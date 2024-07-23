@@ -3,7 +3,7 @@ const router = express.Router();
 
 const multer = require('multer');
 const { adminAuth } = require('../middleware/autharization');
-const {createnewcourt} = require('../controllers/adminController')
+const {createnewcourt,CreateSchedule} = require('../controllers/adminController')
 const storage = multer.diskStorage({
   destination:function(req,file,cb){
     cb(null,'public/images')
@@ -16,5 +16,7 @@ const storage = multer.diskStorage({
 const upload = multer({storage:storage})
 
 router.post('/createnewcourt',adminAuth,upload.array('files'),createnewcourt );
+
+router.post('/createschedules',adminAuth,CreateSchedule)
 
 module.exports = router;

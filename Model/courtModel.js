@@ -32,6 +32,9 @@ const courtSchema = new mongoose.Schema({
   courtPics: {
     type: Array
   },
+  description:{
+    type:String
+  },
 
 timeStamp:{
         type:Date,
