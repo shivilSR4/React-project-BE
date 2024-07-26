@@ -12,12 +12,13 @@ const scheduleSchema = mongoose.Schema({
         type:Number,
         required:true
     },
-    bookedby:{
+    bookedBy:{
         type:mongoose.Types.ObjectId,
         ref:'users'
     },
-    cancellation:{
-        type:Array
+    orderId:{
+        type:mongoose.Types.ObjectId,
+        ref:'orders'
     },
     courtId:{
         type:mongoose.Types.ObjectId,

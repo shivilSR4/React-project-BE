@@ -71,7 +71,7 @@ const CreateSchedule = (req, res) => {
       currentDate.setDate(currentDate.getDate() + 1);
     }
 
-    console.log(slotObjects);
+    // console.log(slotObjects);
 
     COURTSCHEDULE.insertMany(slotObjects)
       .then(() => {
