@@ -1,26 +1,76 @@
-const { response } = require('../app')
-const USERS = require('../Model/userModel')
-const bcrypt = require('bcrypt')
-const jwt = require('jsonwebtoken')
+const { response } = require('../app');
+const USERS = require('../Model/userModel');
+const bcrypt = require('bcrypt');
+const jwt = require('jsonwebtoken');
+const admin = require('../config/firebase'); 
+const nodemailer = require('nodemailer')
+const twilio = require('twilio');
 
-// Adjust the path to your user model
+
+const twilioClient = twilio(process.env.TWILIO_SID, process.env.TWILIO_AUTH_TOKEN);
+
+const generateOTP = () => {
+  return Math.floor(100000 + Math.random() * 900000).toString();
+};
+
+const sendOTPEmail = (email, otp) => {
+  const transporter = nodemailer.createTransport({
+    service: 'Gmail',
+    auth: {
+      user: process.env.EMAIL,
+      pass: process.env.EMAIL_PASSWORD,
+    },
+  });
+
+  const mailOptions = {
+    from: process.env.EMAIL,
+    to: email,
+    subject: 'Your OTP Code',
+    text: `Your OTP code is ${otp}`,
+  };
+
+  return transporter.sendMail(mailOptions);
+};
+
+const sendOTPSMS = (mobileNumber, otp) => {
+  const formattedPhoneNumber = mobileNumber.startsWith('+91') ? mobileNumber : `+91${mobileNumber}`;
+  return twilioClient.messages.create({
+    body: `Your OTP code is ${otp}`,
+    from: process.env.TWILIO_PHONE_NUMBER,
+    to: formattedPhoneNumber,
+  });
+};
 
 const doSignup = (req, res) => {
-  bcrypt.hash(req.body.password, parseInt(process.env.SALT_ROUNDS), function(err, hash) {
+  const otp = generateOTP();
+
+
+  bcrypt.hash(req.body.password, parseInt(process.env.SALT_ROUNDS), function (err, hash) {
     if (err) {
       return res.status(500).json({ message: 'Error hashing password' });
     }
 
+    const formattedPhoneNumber = req.body.mobileNumber.startsWith('+91') ? req.body.mobileNumber : `+91${req.body.mobileNumber}`;
+
     const newUser = new USERS({
       Name: req.body.Name,
       email: req.body.email,
-      mobileNumber: req.body.mobileNumber,
-      password: hash
+      mobileNumber: formattedPhoneNumber, 
+      password: hash,
+      otp: otp,
     });
 
+
     newUser.save()
-      .then(response => {
-        res.status(200).json({ message: 'Signup successful' });
+      .then(async (response) => {
+        try {
+          await sendOTPEmail(req.body.email, otp);
+          await sendOTPSMS(req.body.mobileNumber, otp);
+          res.status(200).json({ message: response });
+        } catch (error) {
+          console.log(error);
+          res.status(500).json({ message: 'Error sending OTP' });
+        }
       })
       .catch(error => {
         console.log(error);
@@ -33,33 +83,85 @@ const doSignup = (req, res) => {
   });
 };
 
+const doLogin = async (req, res) => {
+  const { uid, email, displayName, idToken } = req.body;
+  
+  try {
+    if (idToken) {
+      const decodedToken = await admin.auth().verifyIdToken(idToken);
+      const googleEmail = decodedToken.email;
 
-const doLogin = async(req,res)=>{
-    try {
-        const {email,password} = req.body
-    const userData = await USERS.findOne({email:email})
-    if(userData){
-      bcrypt.compare(password,userData.password,(err,result)=>{
-        if(result){
-       
-userData.password = undefined
-   const options = {
-    expiresIn:"2d",
-    algorithm:"HS256"
-   }
-const token = jwt.sign({...userData},process.env.JWT_PASSWORD,options)
-   res.status(200).json({user:userData,token})
-        }else{
-            res.status(401).json({message:"invalid credential"})
-        }
-      })
-    }else{
-        res.status(401).json({message:"invalid credential"})
+      let userData = await USERS.findOne({ email: googleEmail });
+
+      if (!userData) {
+        const newUser = new USERS({
+          Name: decodedToken.name || displayName,
+          email: googleEmail,
+          mobileNumber: '', 
+          password: '' 
+        });
+
+        userData = await newUser.save();
+      }
+
+      userData.password = undefined;
+      const options = {
+        expiresIn: "2d",
+        algorithm: "HS256"
+      };
+      const token = jwt.sign({ ...userData._doc }, process.env.JWT_PASSWORD, options);
+
+      res.status(200).json({ user: userData, token });
+
+    } else {
+      const { email, password } = req.body;
+      const userData = await USERS.findOne({ email });
+
+      if (userData) {
+        bcrypt.compare(password, userData.password, (err, result) => {
+          if (result) {
+            userData.password = undefined;
+            const options = {
+              expiresIn: "2d",
+              algorithm: "HS256"
+            };
+            const token = jwt.sign({ ...userData._doc }, process.env.JWT_PASSWORD, options);
+            res.status(200).json({ user: userData, token });
+          } else {
+            res.status(401).json({ message: "Invalid credentials" });
+          }
+        });
+      } else {
+        res.status(401).json({ message: "Invalid credentials" });
+      }
     }
-    } catch (error) {
-        
-    }
+  } catch (error) {
+    console.error('Error during login:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
 
-}
 
-module.exports = {doSignup,doLogin}
+const verifyotp = (req, res) => {
+  const { email, otp } = req.body;
+
+  USERS.findOne({ email: email })
+    .then(user => {
+      if (user && user.otp === otp) {
+        user.status = 2; 
+        user.otp = null; 
+
+        user.save()
+          .then(() => res.status(200).json({ message: 'OTP verified successfully.' }))
+          .catch(error => res.status(500).json({ message: 'Error updating user status' }));
+      } else {
+        res.status(400).json({ message: 'Invalid OTP' });
+      }
+    })
+    .catch(error => res.status(500).json({ message: 'User not found' }));
+};
+
+
+
+
+module.exports = { doSignup, doLogin ,verifyotp};
