@@ -66,7 +66,7 @@ const doSignup = (req, res) => {
         try {
           await sendOTPEmail(req.body.email, otp);
           await sendOTPSMS(req.body.mobileNumber, otp);
-          res.status(200).json({ message: response });
+          res.status(200).json({ user: response });
         } catch (error) {
           console.log(error);
           res.status(500).json({ message: 'Error sending OTP' });
@@ -85,7 +85,9 @@ const doSignup = (req, res) => {
 
 const doLogin = async (req, res) => {
   const { uid, email, displayName, idToken } = req.body;
-  
+
+ console.log(uid, email, displayName, idToken );
+ 
   try {
     if (idToken) {
       const decodedToken = await admin.auth().verifyIdToken(idToken);
@@ -152,7 +154,15 @@ const verifyotp = (req, res) => {
         user.otp = null; 
 
         user.save()
-          .then(() => res.status(200).json({ message: 'OTP verified successfully.' }))
+          .then(() => {
+            const options = {
+              expiresIn: "2d",
+              algorithm: "HS256"
+            };
+
+            const token = jwt.sign({ ...user._doc }, process.env.JWT_PASSWORD, options);
+            res.status(200).json({ user: user, token });
+          })
           .catch(error => res.status(500).json({ message: 'Error updating user status' }));
       } else {
         res.status(400).json({ message: 'Invalid OTP' });
@@ -161,7 +171,56 @@ const verifyotp = (req, res) => {
     .catch(error => res.status(500).json({ message: 'User not found' }));
 };
 
+const resendopt = (req, res) => {
+try {
+  const { email, mobileNumber } = req.body;
+  const formattedPhoneNumber = mobileNumber.startsWith('+91') ? mobileNumber : `+91${mobileNumber}`;
+
+  console.log(`Resending OTP to email: ${email}, mobile: ${formattedPhoneNumber}`);
+
+  USERS.findOne({ email: email })
+    .then(data => {
+      if (data) {
+        const newOtp = generateOTP();
+        data.otp = newOtp;
+
+        data.save()
+          .then(async () => {
+            try {
+              console.log(`Sending OTP SMS to ${formattedPhoneNumber}`);
+              await sendOTPSMS(formattedPhoneNumber, newOtp);
+              console.log(`Sending OTP Email to ${email}`);
+              await sendOTPEmail(email, newOtp);
+              res.status(200).json({ message: 'OTP sent successfully' });
+            } catch (error) {
+              console.error('Error sending OTP:', error);
+              res.status(500).json({ message: 'Error sending OTP' });
+            }
+          })
+          .catch(error => {
+            console.error('Error saving user:', error);
+            res.status(500).json({ message: 'Internal server error' });
+          });
+      } else {
+        console.error('User not found');
+        res.status(404).json({ message: 'User not found' });
+      }
+    })
+    .catch(error => {
+      console.error('Error finding user:', error);
+      res.status(500).json({ message: 'Internal server error' });
+    });
+} catch (error) {
+  console.log(error);
+  
+}
+
+ 
+};
 
 
 
-module.exports = { doSignup, doLogin ,verifyotp};
+
+
+
+module.exports = { doSignup, doLogin ,verifyotp,resendopt};
